@@ -1,6 +1,8 @@
 CloudMapper
 ========
-CloudMapper generates network diagrams of Amazon Web Services (AWS) environments and displays them via your browser. It helps you understand visually what exists in your accounts and identify possible network misconfigurations.
+[![Build Status](https://travis-ci.org/duo-labs/cloudmapper.svg?branch=master)](https://travis-ci.org/duo-labs/cloudmapper)
+
+CloudMapper helps you analyze your Amazon Web Services (AWS) environments.  The original purpose was to generate network diagrams and display them in your browser.  It now contains much more functionality.
 
 *Demo: https://duo-labs.github.io/cloudmapper/*
 
@@ -10,17 +12,10 @@ CloudMapper generates network diagrams of Amazon Web Services (AWS) environments
 
 ![Demo screenshot](docs/images/ideal_layout.png "Demo screenshot")
 
-There are four stages to using CloudMapper:
-1. Configure information about your account.
-2. Collect information about an AWS account via a shell script that uses the AWS CLI.
-3. Convert that data into a format usable by the web browser.
-4. Run a simple web server to view the collected data in your browser.
-
-
 ## Installation
 
 Requirements:
-- `pip` and `virtualenv`
+- python 3 (3.7.0rc1 is known to work), `pip`, and `virtualenv`
 - You will also need `jq` (https://stedolan.github.io/jq/) and the library `pyjq` (https://github.com/doloopwhile/pyjq), which require some additional tools installed that will be shown.
 
 On macOS:
@@ -29,39 +24,26 @@ On macOS:
 # clone the repo
 git clone git@github.com:duo-labs/cloudmapper.git
 # Install pre-reqs for pyjq
-brew install autoconf automake libtool jq
+brew install autoconf automake libtool jq awscli python3 pipenv
 cd cloudmapper/
-virtualenv venv
-source venv/bin/activate
-pip install -r requirements.txt
+pipenv install --skip-lock
+pipenv shell
 ```
 
 On Linux:
 ```
 # clone the repo
 git clone git@github.com:duo-labs/cloudmapper.git
-# (Centos, Fedora, RedHat etc.):
-# sudo yum install autoconf automake libtool python-devel jq
+# (AWS Linux, Centos, Fedora, RedHat etc.):
+# sudo yum install autoconf automake libtool python3-devel.x86_64 python3-tkinter python-pip jq awscli
 # (Debian, Ubuntu etc.):
 # You may additionally need "build-essential"
-sudo apt-get install autoconf automake libtool python-dev jq
+sudo apt-get install autoconf automake libtool python3.7-dev python3-tk jq awscli
 cd cloudmapper/
-virtualenv venv
-source venv/bin/activate
-pip install -r requirements.txt
+pipenv install --skip-lock
+pipenv shell
 ```
 
-With Docker:
-```
-# Clone the repo
-git clone git@github.com:duo-labs/cloudmapper.git
-# Edit config.json
-vi config.json
-# Build the docker container
-docker-compose build
-# Set the accountname and run the container (assuming aws_* variables are set)
-accountname="testaccount"  docker-compose up
-```
 
 ## Run with demo data
 
@@ -69,17 +51,16 @@ A small set of demo data is provided.  This will display the same environment as
 
 ```
 python cloudmapper.py prepare --config config.json.demo --account demo
-python cloudmapper.py serve
+python cloudmapper.py webserver
 ```
 
 This will run a local webserver at http://127.0.0.1:8000/
 
-Alternatively using docker:
-```
-docker-compose build && accountname="demo" docker-compose up
-```
 
-# Running with your own data
+# Setup
+
+1. Configure information about your account.
+2. Collect information about an AWS account.
 
 ## 1. Configure your account
 
@@ -97,121 +78,105 @@ python cloudmapper.py configure {add-cidr|remove-cidr} --config-file CONFIG_FILE
 This will allow you to define the different AWS accounts you use in your environment and the known CIDR IPs.
 
 
-## 2. Gather data about the account
+## 2. Collect data about the account
 
-This step uses the CLI to make `describe` calls and records the json in the folder you specify (in this case, named `my_account`). You must have AWS credentials configured that can be used by the CLI.  You must have read-only permissions on the account.  This can be granted via the `SecurityAudit` policy, or can be reduced to an even more minimal set of permissions if desired.  The minimal policy needed is:
+This step uses the CLI to make `describe` and `list` calls and records the json in the folder specified by the account name under `account-data`.
 
+### AWS Privileges required
+You must have AWS credentials configured that can be used by the CLI with read permissions for the different metadata to collect.  I recommend using [aws-vault](https://github.com/99designs/aws-vault).  CloudMapper will collect IAM information, which means you MUST use MFA.  Only the `collect` step requires AWS access.
+
+You must have the following privileges (these grant various read access of metadata):
+
+- `arn:aws:iam::aws:policy/SecurityAudit`
+- `arn:aws:iam::aws:policy/job-function/ViewOnlyAccess`
+
+And also:
 ```
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Resource": "*",
-      "Action": [
-        "ec2:DescribeRegions",
-        "ec2:DescribeAvailabilityZones",
-        "ec2:DescribeVpcs",
-        "ec2:DescribeSubnets",
-        "ec2:DescribeSecurityGroups",
-        "ec2:DescribeVpcPeeringConnections",
-        "ec2:DescribeInstances",
-        "ec2:DescribeNetworkInterfaces",
-        "rds:DescribeDBInstances",
-        "elasticloadbalancing:DescribeLoadBalancers"
-      ]
-    }
-  ]
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": [
+                "acm:DescribeCertificate",
+                "eks:DescribeCluster",
+                "eks:ListClusters",
+                "elasticfilesystem:DescribeMountTargetSecurityGroups",
+                "elasticfilesystem:DescribeMountTargets",
+                "elasticmapreduce:DescribeCluster",
+                "elasticmapreduce:DescribeSecurityConfiguration",
+                "events:DescribeRule",
+                "fms:ListComplianceStatus",
+                "fms:ListPolicies",
+                "guardduty:ListDetectors",
+                "guardduty:ListFindings",
+                "guardduty:ListIPSets",
+                "guardduty:ListInvitations",
+                "guardduty:ListMembers",
+                "guardduty:ListThreatIntelSets",
+                "iam:GenerateServiceLastAccessedDetails",
+                "inspector:DescribeAssessmentRuns",
+                "inspector:DescribeAssessmentTargets",
+                "inspector:DescribeAssessmentTemplates",
+                "inspector:DescribeCrossAccountAccessRole",
+                "inspector:DescribeFindings",
+                "inspector:DescribeResourceGroups",
+                "inspector:DescribeRulesPackages",
+                "iot:DescribeAuthorizer",
+                "iot:DescribeCACertificate",
+                "iot:DescribeCertificate",
+                "iot:DescribeDefaultAuthorizer",
+                "iot:GetPolicy",
+                "iot:GetPolicyVersion",
+                "lambda:GetFunctionConfiguration",
+                "lambda:GetLayerVersionPolicy",
+                "lambda:ListLayers",
+                "lightsail:GetInstances",
+                "opsworks:DescribeStacks",
+                "organizations:Describe*",
+                "organizations:List*",
+                "shield:DescribeAttack",
+                "shield:DescribeProtection",
+                "shield:DescribeSubscription",
+                "sso:DescribePermissionsPolicies",
+                "sso:ListApplicationInstanceCertificates",
+                "sso:ListApplicationInstances",
+                "sso:ListApplicationTemplates",
+                "sso:ListApplications",
+                "sso:ListDirectoryAssociations",
+                "sso:ListPermissionSets",
+                "sso:ListProfileAssociations",
+                "sso:ListProfiles"
+            ],
+            "Resource": "*",
+            "Effect": "Allow"
+        }
+    ]
 }
 ```
 
-Collecting the data can be performed with a bash script or via the python code base.  Both options support a `--profile-name` to specify the AWS account profile to use.
+### Collect the data
 
-### Option 1: Bash script
-Using the script is helpful if you need someone else to get this data for you without fiddling with setting up the python environment.
-
-```
-./collect_data.sh --account my_account
-```
-
-`my_account` is just a name for your account (ex. "prod").  You can also pass a `--profile` option if you have multiple AWS profiles configured.  You should now have a directory with .json files describing your account in a directory named after account name.
-
-### Option 2: Python code
+Collecting the data is done as follows:
 
 ```
-python cloudmapper.py gather --account-name my_account
-```
-
-
-## 3. Prepare the data
-
-This step converts the collected AWS data into a format that can be displayed in the browser by generating a `web/data.json` file.
-```
-python cloudmapper.py prepare --account-name my_account
-```
-
-There are a number of filtering options that can be applied here to reduce the number of nodes and edges.  This will help the diagram look better, by removing some of its complexity, and is also needed for large environments that will not render.
-
-The most useful filtering options:
-* `--regions`: Restrict the diagram to a set regions, ex. `us-east-1,us-east-2`
-* `--vpc-ids` and `--vpc-names`: Restrict the diagram to a set of VPCs.
-* `--collapse-by-tag`: This is very useful to provide a tag name, and all nodes with that tag will be reduced to a single displayed node.
-
-The other filtering options are:
-* `--internal-edges` (default) and `--no-internal-edges`: When you only care about showing what is publicly accessible, use `--no-internal-edges`.
-* `--inter-rds-edges` and `--no-inter-rds-edges` (default): By default, any communication paths between RDS nodes are not shown, as this is unlikely to be of interest. To display them, use `--inter-rds-edges`.
-* `--read-replicas` (default) and `--no-read-replicas`: By default, RDS read replica nodes are shown. You can ignore them by using `--no-read-replicas`.
-* `--azs` (default) and `--no-azs`: Availability zones are shown by default.  To ignore them, use `--no-azs`.
-
-
-## 4. Run a webserver
-
-You can host the `web` directory with your webserver of choice, or just run:
-
-```
-python cloudmapper.py serve
+python cloudmapper.py collect --account my_account
 ```
 
 
 
-Using the UI
-============
+# Commands
 
-Mouse actions
--------------
-- Pan and zoom can be done with the UI controls, or arrow keys and -/+ keys.
-- Clicking on a node selects it (background turns yellow).  Double-clicking a node makes its deleted neighbors visible again.
-- Unselect a node by clicking on a new one, or holding shift and clicking on the selected node again.
-- Holding down shift can be used to select multiple nodes. Holding shift, clicking, and dragging over an area, selects all nodes that overlap that area.
-- Click on a node and drag it to move it around.
+- `api_endpoints`: List the URLs that can be called via API Gateway.
+- `audit`: Check for potential misconfigurations.
+- `collect`: Collect metadata about an account. More details [here](https://summitroute.com/blog/2018/06/05/cloudmapper_collect/).
+- `find_admins`: Look at IAM policies to identify admin users and roles and spot potential IAM issues. More details [here](https://summitroute.com/blog/2018/06/12/cloudmapper_find_admins/).
+- `prepare`/`webserver`: See [Network Visualizations](docs/network_visualizations.md)
+- `public`: Find public hosts and port ranges. More details [here](https://summitroute.com/blog/2018/06/13/cloudmapper_public/).
+- `sg_ips`: Get geoip info on CIDRs trusted in Security Groups. More details [here](https://summitroute.com/blog/2018/06/12/cloudmapper_sg_ips/).
+- `stats`: Show counts of resources for accounts. More details [here](https://summitroute.com/blog/2018/06/06/cloudmapper_stats/).
+- `wot`: Show Web Of Trust. More details [here](https://summitroute.com/blog/2018/06/13/cloudmapper_wot/).
 
-<img src="https://raw.githubusercontent.com/duo-labs/cloudmapper/master/docs/images/command_icons.png" width=300 alt="Command icons">
-
-Commands
---------
-- Delete (d): Select a node and click the eye with a slash through it to delete (ie. hide) it. Click the eye to undelete (unhide) all deleted nodes.   All nodes connected to a deleted node will get a black border. If you double-click on a node with a black border, its deleted neighbors will be undeleted.
-
-<img src="https://raw.githubusercontent.com/duo-labs/cloudmapper/master/docs/images/deleted_node.png" width=300 alt="Deleted node">
-
-- Highlight (h): Select a node and click the symbol of the connected nodes to highlight the neighbors of a node. Click the inverse symbol to unhighlight the neighbors.  Highlight neighbors makes it easier to see which nodes are connected.
-
-<img src="https://raw.githubusercontent.com/duo-labs/cloudmapper/master/docs/images/highlight_neighbors.png" width=300 alt="Highlighted neighbors">
-
-- Collapse all: Click the icon of the arrows pointed toward each other to collapse all nodes.  Click the symbol of the arrows pointed away to uncollapse all collapsed node.
-
-<img src="https://raw.githubusercontent.com/duo-labs/cloudmapper/master/docs/images/collapsed_node.png" width=300 alt="Collapsed node">
-
-- Collapse (c/e): The "minus" symbol will collapse a node, and the "plus" symbol will expand it.
-- Randomize layout (r): The hammer symbol will randomly layout the diagram in a new way.
-- Save image: The camera symbol will save a high resolution image of the diagram. This is helpful when your diagram has many nodes such that you must be zoomed out, so a screenshot would not get the same level of detail.
-- Import/Export: This will save the layout as a json file that you can then upload. This is helpful if you've moved nodes or made other changes and wish to "save" your work. Re-opening saved files does have some bugs.
-
-
-When you first start, the initial layout is never ideal.  We use what is believed to be the best layout algorithm for compound node diagrams, [CoSE](https://github.com/cytoscape/cytoscape.js-cose-bilkent), but this will still require manual editing by moving nodes around.
-
-Here is the layout you'll likely see initially when you view the demo:
-![Initial layout](docs/images/initial_layout.png "Initial layout")
-
+If you want to add your own private commands, you can create a `private_commands` directory and add them there.
 
 Licenses
 --------
